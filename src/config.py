@@ -23,8 +23,8 @@ if not os.getenv("PYTHON_DOTENV_DISABLED"):
 
 logger = logging.getLogger(__name__)
 
-ModelTransport = Literal["anthropic", "openai", "gemini"]
-EmbeddingTransport = Literal["openai", "gemini"]
+ModelTransport = Literal["anthropic", "openai", "gemini", "nvidia"]
+EmbeddingTransport = Literal["openai", "gemini", "sentence-transformers"]
 EmbeddingDimensionsMode = Literal["auto", "always", "never"]
 
 # OpenAI-compatible models that reject the `dimensions=` request parameter.
@@ -36,6 +36,8 @@ _EMBEDDING_KNOWN_REJECTING_MODELS: frozenset[str] = frozenset(
 def _default_embedding_model_for_transport(transport: EmbeddingTransport) -> str:
     if transport == "gemini":
         return "gemini-embedding-001"
+    if transport == "sentence-transformers":
+        return "all-MiniLM-L6-v2"
     return "text-embedding-3-small"
 
 
@@ -155,7 +157,7 @@ def _normalize_model_transport(data: Any) -> Any:
     transport_value = update.get("transport")
     if isinstance(model_value, str) and "/" in model_value and transport_value is None:
         prefix, bare_model = model_value.split("/", 1)
-        if prefix in {"anthropic", "openai", "gemini"}:
+        if prefix in {"anthropic", "openai", "gemini", "nvidia"}:
             update["transport"] = prefix
             update["model"] = bare_model
     return update
@@ -404,7 +406,7 @@ class ConfiguredEmbeddingModelSettings(BaseModel):
             and transport_value is None
         ):
             prefix, bare_model = model_value.split("/", 1)
-            if prefix in {"openai", "gemini"}:
+            if prefix in {"openai", "gemini", "sentence-transformers"}:
                 update["transport"] = prefix
                 update["model"] = bare_model
         return update
@@ -441,7 +443,7 @@ class EmbeddingModelConfig(BaseModel):
             and transport_value is None
         ):
             prefix, bare_model = model_value.split("/", 1)
-            if prefix in {"openai", "gemini"}:
+            if prefix in {"openai", "gemini", "sentence-transformers"}:
                 update["transport"] = prefix
                 update["model"] = bare_model
         return update
@@ -752,12 +754,14 @@ class LLMSettings(HonchoSettings):
     ANTHROPIC_API_KEY: str | None = None
     OPENAI_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
+    NVIDIA_API_KEY: str | None = None
 
     # Base URLs for LLM providers (for OpenAI-compatible proxies like
     # OpenRouter, vLLM, Together, Anyscale, self-hosted, etc.)
     ANTHROPIC_BASE_URL: str | None = None
     OPENAI_BASE_URL: str | None = None
     GEMINI_BASE_URL: str | None = None
+    NVIDIA_BASE_URL: str | None = None
 
     # General LLM settings
     DEFAULT_MAX_TOKENS: Annotated[int, Field(default=1000, gt=0, le=100_000)] = 2500

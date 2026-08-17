@@ -179,7 +179,11 @@ class _EmbeddingClient:
         self.vector_dimensions: int = vector_dimensions
         self.send_dimensions: bool = send_dimensions
 
-        if self.transport == "gemini":
+        if self.transport == "sentence-transformers":
+            self.max_embedding_tokens = min(max_input_tokens, 256)
+            self.max_batch_size = config.max_batch_size or 32
+            self.client = None
+        elif self.transport == "gemini":
             if not config.api_key:
                 raise ValueError("Gemini API key is required")
             # 10-minute HTTP timeout, in lockstep with the LLM registry's Gemini
@@ -237,6 +241,23 @@ class _EmbeddingClient:
         # Bind the typed client at the dispatch site so pyright can narrow it
         # for the closures without needing `assert isinstance(...)` (bandit
         # B101). The closures close over the narrowed local, not `self.client`.
+        if self.transport == "sentence-transformers":
+            from .local_embeddings import sentence_transformers_pipeline
+            
+            async def _call_st() -> list[float]:
+                embedding = await sentence_transformers_pipeline.embed(query)
+                if not embedding:
+                    raise ValueError("No embedding returned from Sentence Transformers")
+                return self._validate_embedding_dimensions(embedding)
+                
+            return await _emit_embedding_call(
+                provider=self.transport,
+                model=self.model,
+                texts=[query],
+                input_tokens_estimate=token_count,
+                fn=_call_st,
+            )
+
         if isinstance(self.client, genai.Client):
             gemini_client = self.client
 
@@ -450,7 +471,14 @@ class _EmbeddingClient:
             attempt is a distinct provider hit and shows up as its own line
             item in analytics."""
             result: dict[str, dict[int, list[float]]] = defaultdict(dict)
-            if isinstance(self.client, genai.Client):
+            if self.transport == "sentence-transformers":
+                from .local_embeddings import sentence_transformers_pipeline
+                texts_to_embed = [item.text for item in batch]
+                embeddings = await sentence_transformers_pipeline.simple_batch_embed(texts_to_embed)
+                for item, embedding in zip(batch, embeddings, strict=True):
+                    if embedding:
+                        result[item.text_id][item.chunk_index] = self._validate_embedding_dimensions(embedding)
+            elif isinstance(self.client, genai.Client):
                 response = await self.client.aio.models.embed_content(
                     model=self.model,
                     contents=[item.text for item in batch],

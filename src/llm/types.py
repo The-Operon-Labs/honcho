@@ -30,8 +30,10 @@ ReasoningEffortType = (
 )
 VerbosityType = Literal["low", "medium", "high"] | None
 
+from src.llm.providers.nvidia_provider import NVIDIAInferenceProvider
+
 # Raw SDK client union used by the provider-selection layer.
-ProviderClient = AsyncAnthropic | AsyncOpenAI | genai.Client
+ProviderClient = AsyncAnthropic | AsyncOpenAI | genai.Client | NVIDIAInferenceProvider
 
 
 @dataclass

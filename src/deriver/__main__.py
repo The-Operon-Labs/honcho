@@ -13,6 +13,7 @@ from src.telemetry import (
     register_db_pool_collector,
     shutdown_telemetry,
 )
+from src.local_embeddings import sentence_transformers_pipeline
 
 from .queue_manager import main
 
@@ -71,6 +72,10 @@ async def run_deriver():
         # gate the API runs in its lifespan. Inside the try block so the
         # telemetry buffer is still flushed if validation raises.
         await validate_embedding_schema(engine)
+
+        if settings.EMBEDDING.MODEL_CONFIG.transport == "sentence-transformers":
+            sentence_transformers_pipeline.load_model(settings.EMBEDDING.MODEL_CONFIG.model)
+
         await main()
     finally:
         # Shutdown telemetry (flush CloudEvents buffer)

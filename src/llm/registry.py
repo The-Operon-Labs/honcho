@@ -23,6 +23,8 @@ from .backend import ProviderBackend
 from .backends.anthropic import AnthropicBackend
 from .backends.gemini import GeminiBackend
 from .backends.openai import OpenAIBackend
+from .backends.nvidia import NVIDIABackend
+from .providers.nvidia_provider import NVIDIAInferenceProvider
 from .credentials import default_transport_api_key
 from .history_adapters import (
     AnthropicHistoryAdapter,
@@ -142,6 +144,13 @@ def get_gemini_override_client(
     )
 
 
+@lru_cache(maxsize=128)
+def get_nvidia_override_client(
+    base_url: str | None, api_key: str | None
+) -> NVIDIAInferenceProvider:
+    return NVIDIAInferenceProvider(api_key=api_key or "", base_url=base_url or "")
+
+
 # Module-level default-client registry, populated at import time. Tests patch
 # this dict via `patch.dict(CLIENTS, {...})` to inject mock provider clients.
 CLIENTS: dict[ModelTransport, ProviderClient] = {}
@@ -164,6 +173,12 @@ if settings.LLM.GEMINI_API_KEY:
     CLIENTS["gemini"] = genai.Client(
         api_key=settings.LLM.GEMINI_API_KEY,
         http_options=_build_gemini_http_options(settings.LLM.GEMINI_BASE_URL),
+    )
+
+if settings.LLM.NVIDIA_API_KEY:
+    CLIENTS["nvidia"] = NVIDIAInferenceProvider(
+        api_key=settings.LLM.NVIDIA_API_KEY,
+        base_url=settings.LLM.NVIDIA_BASE_URL or "",
     )
 
 
@@ -193,6 +208,8 @@ def client_for_model_config(
         return get_openai_override_client(base_url, api_key)
     if provider == "gemini":
         return get_gemini_override_client(base_url, api_key)
+    if provider == "nvidia":
+        return get_nvidia_override_client(base_url, api_key)
     assert_never(provider)
 
 
@@ -207,6 +224,8 @@ def backend_for_provider(
         return OpenAIBackend(client)
     if provider == "gemini":
         return GeminiBackend(client)
+    if provider == "nvidia":
+        return NVIDIABackend(client)
     assert_never(provider)
 
 
@@ -243,5 +262,6 @@ __all__ = [
     "get_gemini_override_client",
     "get_openai_client",
     "get_openai_override_client",
+    "get_nvidia_override_client",
     "history_adapter_for_provider",
 ]

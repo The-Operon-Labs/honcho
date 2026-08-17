@@ -218,13 +218,13 @@ async def query_external_vector_document_ids(
     top_k: int = 5,
     max_distance: float | None = None,
     filters: dict[str, Any] | None = None,
-) -> list[str] | None:
+) -> list[tuple[str, float]] | None:
     """Query external vector store for document IDs sorted by similarity.
 
     No DB session needed — safe to call outside a tracked_db scope.
 
     Returns:
-        Ordered list of document IDs on the external-store path,
+        Ordered list of document ID and distance tuples on the external-store path,
         empty list when the external store has no results,
         or None when the pgvector (DB-only) path should be used instead.
     """
@@ -257,7 +257,7 @@ async def query_external_vector_document_ids(
     if not vector_results:
         return []
 
-    return [result.id for result in vector_results]
+    return [(result.id, result.score) for result in vector_results]
 
 
 async def fetch_documents_by_ids(
@@ -299,8 +299,9 @@ async def _query_documents_pgvector(
     top_k: int,
 ) -> list[models.Document]:
     """pgvector similarity search — pure DB operation."""
+    distance_expr = models.Document.embedding.cosine_distance(embedding).label("distance")
     stmt = (
-        select(models.Document)
+        select(models.Document, distance_expr)
         .where(models.Document.workspace_name == workspace_name)
         .where(models.Document.observer == observer)
         .where(models.Document.observed == observed)
@@ -310,16 +311,20 @@ async def _query_documents_pgvector(
 
     if max_distance is not None:
         stmt = stmt.where(
-            models.Document.embedding.cosine_distance(embedding) <= max_distance
+            distance_expr <= max_distance
         )
 
     stmt = apply_filter(stmt, models.Document, filters)
-    stmt = stmt.order_by(models.Document.embedding.cosine_distance(embedding)).limit(
+    stmt = stmt.order_by(distance_expr).limit(
         top_k
     )
 
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    docs = []
+    for doc, dist in result.all():
+        doc.distance = float(dist)
+        docs.append(doc)
+    return docs
 
 
 async def query_documents(
@@ -397,7 +402,7 @@ async def query_documents(
             return docs
 
     # External vector store — network call first, DB only for the ID fetch
-    document_ids = await query_external_vector_document_ids(
+    external_results = await query_external_vector_document_ids(
         workspace_name=workspace_name,
         observer=observer,
         observed=observed,
@@ -407,11 +412,14 @@ async def query_documents(
         filters=filters,
     )
 
-    if not document_ids:
+    if not external_results:
         return []
+        
+    document_ids = [r[0] for r in external_results]
+    id_to_distance = {r[0]: r[1] for r in external_results}
 
     if db is not None:
-        return await fetch_documents_by_ids(
+        docs = await fetch_documents_by_ids(
             db=db,
             workspace_name=workspace_name,
             observer=observer,
@@ -419,6 +427,10 @@ async def query_documents(
             document_ids=document_ids,
             filters=filters,
         )
+        for doc in docs:
+            doc.distance = id_to_distance.get(doc.id, 0.0)
+        return docs
+        
     async with tracked_db("query_documents.fetch", read_only=True) as managed_db:
         docs = await fetch_documents_by_ids(
             db=managed_db,
@@ -429,6 +441,7 @@ async def query_documents(
             filters=filters,
         )
         for doc in docs:
+            doc.distance = id_to_distance.get(doc.id, 0.0)
             managed_db.expunge(doc)
         return docs
 

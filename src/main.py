@@ -122,6 +122,11 @@ async def lifespan(_: FastAPI):
             "Error initializing cache in api process; proceeding without cache: %s", e
         )
 
+    # Eagerly load the SentenceTransformers embedding model if it's the active transport.
+    if settings.EMBEDDING.MODEL_CONFIG.transport == "sentence-transformers":
+        from src.local_embeddings import sentence_transformers_pipeline
+        sentence_transformers_pipeline.load_model(settings.EMBEDDING.MODEL_CONFIG.model)
+
     try:
         yield
     finally:

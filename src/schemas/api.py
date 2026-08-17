@@ -465,6 +465,7 @@ class Conclusion(BaseModel):
         ),
     )
     created_at: datetime.datetime
+    distance: float | None = None
 
     model_config = ConfigDict(  # pyright: ignore
         from_attributes=True,
