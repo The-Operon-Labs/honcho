@@ -14,11 +14,11 @@ services:
       context: .
       dockerfile: Dockerfile
     entrypoint: ["sh", "docker/entrypoint.sh"]
-    depends_on:
-      database:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    # depends_on:
+    #   database:
+    #     condition: service_healthy
+    #   redis:
+    #     condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -32,18 +32,36 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 600s
     # -- Development: mount source for live reload --
     # volumes:
     #   - .:/app
     #   - venv:/app/.venv
+    
+    # OLD STANDALONE ENVIRONMENT:
+    # environment:
+    #   - DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@database:5432/postgres
+    #   - CACHE_URL=redis://redis:6379/0?suppress=true
+    #   - CACHE_ENABLED=true
+    
+    # NEW VM INTEGRATION ENVIRONMENT:
     environment:
-      - DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@database:5432/postgres
-      - CACHE_URL=redis://redis:6379/0?suppress=true
+      # These use the internal network hostnames from operon-dev
+      - DB_CONNECTION_URI=postgresql+psycopg://operon:operon123@operon_rca_postgres:5432/honcho_db
+      - CACHE_URL=redis://operon_redis_server:6379/0?suppress=true
       - CACHE_ENABLED=true
+      - HF_ENDPOINT=https://hf-mirror.com
+      - HF_HUB_DISABLE_SYMLINKS_WARNING=1
+      # Explicitly tell HuggingFace to use the mounted cache folder
+      - HF_HOME=/app/.cache/huggingface
+    
     env_file:
       - path: .env
         required: false
+    networks:
+      - default
+    volumes:
+      - huggingface_cache:/app/.cache/huggingface
     restart: unless-stopped
 
   deriver:
@@ -54,59 +72,78 @@ services:
     depends_on:
       api:
         condition: service_healthy
-      database:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    #   database:
+    #     condition: service_healthy
+    #   redis:
+    #     condition: service_healthy
     # -- Development: mount source for live reload --
     # volumes:
     #   - .:/app
     #   - venv:/app/.venv
+    
+    # OLD STANDALONE ENVIRONMENT:
+    # environment:
+    #   - DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@database:5432/postgres
+    #   - CACHE_URL=redis://redis:6379/0?suppress=true
+    #   - CACHE_ENABLED=true
+
+    # NEW VM INTEGRATION ENVIRONMENT:
     environment:
-      - DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@database:5432/postgres
-      - CACHE_URL=redis://redis:6379/0?suppress=true
+      # These use the internal network hostnames from operon-dev
+      - DB_CONNECTION_URI=postgresql+psycopg://operon:operon123@operon_rca_postgres:5432/honcho_db
+      - CACHE_URL=redis://operon_redis_server:6379/0?suppress=true
       - CACHE_ENABLED=true
+      - HF_ENDPOINT=https://hf-mirror.com
+      - HF_HUB_DISABLE_SYMLINKS_WARNING=1
+      # Explicitly tell HuggingFace to use the mounted cache folder
+      - HF_HOME=/app/.cache/huggingface
+
     env_file:
       - path: .env
         required: false
+    networks:
+      - default
+    volumes:
+      - huggingface_cache:/app/.cache/huggingface
     restart: unless-stopped
 
-  database:
-    image: pgvector/pgvector:pg15
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:5432:5432"
-    command: ["postgres", "-c", "max_connections=200"]
-    environment:
-      - POSTGRES_DB=postgres
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      # Allow passwordless connections from the host (port is bound to 127.0.0.1).
-      # Lets the local test suite and ad-hoc tools connect without supplying a
-      # password. Do NOT use this in production.
-      - POSTGRES_HOST_AUTH_METHOD=trust
-      - PGDATA=/var/lib/postgresql/data/pgdata
-    volumes:
-      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
-      - pgdata:/var/lib/postgresql/data/
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:8.2
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+  # --- OLD STANDALONE SERVICES (COMMENTED OUT FOR VM DEPLOYMENT) ---
+  # database:
+  #   image: pgvector/pgvector:pg15
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:5432:5432"
+  #   command: ["postgres", "-c", "max_connections=200"]
+  #   environment:
+  #     - POSTGRES_DB=postgres
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=postgres
+  #     # Allow passwordless connections from the host (port is bound to 127.0.0.1).
+  #     # Lets the local test suite and ad-hoc tools connect without supplying a
+  #     # password. Do NOT use this in production.
+  #     - POSTGRES_HOST_AUTH_METHOD=trust
+  #     - PGDATA=/var/lib/postgresql/data/pgdata
+  #   volumes:
+  #     - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+  #     - pgdata:/var/lib/postgresql/data/
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+  #
+  # redis:
+  #   image: redis:8.2
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "redis-cli ping"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
 
   # -- Development: monitoring stack (uncomment to enable) --
   # prometheus:
@@ -134,9 +171,17 @@ services:
   #     prometheus:
   #       condition: service_started
 
+networks:
+  default:
+    name: operon_network
+    external: true
+
 volumes:
-  pgdata:
-  redis-data:
+  # pgdata:
+  # redis-data:
+  huggingface_cache:
+    name: operon-dev_huggingface_cache
+    external: true
   # -- Development: uncomment if using source mounts --
   # venv:
   # prometheus-data:
